@@ -19,7 +19,7 @@ def extract_crypto():
         response.raise_for_status()
         data = response.json()
         
-        # On ajoute le timestamp d'ingestion
+        # timestamp d'ingestion
         timestamp = datetime.now()
         for coin in data:
             coin['ingested_at'] = timestamp
@@ -28,8 +28,6 @@ def extract_crypto():
         client = pymongo.MongoClient(MONGO_URI)
         db = client[DB_NAME]
         
-        # On vide la table brute pour ne garder que le "snapshot" actuel (l'instant T)
-        # Dans un vrai projet Big Data, on garderait l'historique, mais ici on veut le "Live"
         db[COLLECTION_RAW].drop()
         
         if data:

@@ -3,7 +3,7 @@ import pymongo
 from dotenv import load_dotenv
 import sys
 
-# 1. Chargement de la config
+# Chargement de la config
 load_dotenv()
 
 MONGO_URI = os.getenv("MONGO_URI")
@@ -11,27 +11,27 @@ DB_NAME = os.getenv("DB_NAME")
 
 print("--- 🛠 TEST DE DIAGNOSTIC MONGODB ---")
 
-# Vérification basique de la présence du .env
+# présence du .env
 if not MONGO_URI:
     print("❌ ERREUR CRITIQUE : Variable MONGO_URI introuvable.")
     print("   -> Vérifie que ton fichier .env existe et contient MONGO_URI.")
     sys.exit(1)
 
-# Masquage du mot de passe pour l'affichage (Sécurité)
+# Masquage du mot de passe pour l'affichage
 uri_masked = MONGO_URI.split("@")[-1] if "@" in MONGO_URI else "URI Malformée"
 print(f"ℹ️  Tentative de connexion vers : ...@{uri_masked}")
 
 try:
-    # 2. Création du client avec un timeout court (5 secondes max)
-    # Si ça ne répond pas en 5s, on considère que c'est mort.
+    # Création du client avec un timeout court (5 secondes max)
+    # Si ça ne répond pas en 5s = dead
     client = pymongo.MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
     
-    # 3. Le vrai test : La commande "ping"
+    # commande "ping"
     print("⏳ Envoi du ping au serveur...")
     client.admin.command('ping')
     print("✅ SUCCÈS : Le serveur MongoDB a répondu au ping !")
 
-    # 4. Vérification des accès (Lister les bases)
+    # Vérification des accès
     print("📋 Vérification des droits d'accès...")
     dbs = client.list_database_names()
     
@@ -41,10 +41,9 @@ try:
         print(f"⚠️ La base '{DB_NAME}' n'existe pas encore (elle sera créée à la première insertion).")
         print(f"   -> Bases existantes : {', '.join(dbs)}")
 
-    # 5. Info technique (Bonus pour faire pro)
     server_info = client.server_info()
     version = server_info.get("version")
-    print(f"🌍 Version du serveur Atlas : {version}")
+    print(f"Version du serveur Atlas : {version}")
 
 except pymongo.errors.ServerSelectionTimeoutError:
     print("\n❌ ERREUR DE CONNEXION (Timeout)")

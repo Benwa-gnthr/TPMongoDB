@@ -17,15 +17,15 @@ def clean_crypto_data():
     
     print("⚙️  Nettoyage et Analyse en cours...")
     for coin in raw_data:
-        # Analyse de la tendance
+        # Tendance
         change = coin.get("price_change_percentage_24h", 0)
         trend = "🔥 Hausse" if change > 0 else "🔻 Baisse"
         
-        # Catégorisation (Logic Metier)
+        # Catégorisation
         rank = coin.get("market_cap_rank")
         category = "Top 10" if rank <= 10 else "Altcoin"
         
-        # Construction du document propre
+        # Build doc propre
         clean_doc = {
             "nom": coin.get("name"),
             "symbole": coin.get("symbol").upper(),
@@ -38,8 +38,8 @@ def clean_crypto_data():
         }
         clean_data.append(clean_doc)
     
-    # 2. Écriture dans la collection PROPRE
-    db["market_cap_clean"].drop() # On remplace par les données fraîches
+    # 2. Écriture dans la collection "market_cap_clean"
+    db["market_cap_clean"].drop()
     
     if clean_data:
         db["market_cap_clean"].insert_many(clean_data)
