@@ -1,10 +1,11 @@
 import streamlit as st
 import pymongo
 import pandas as pd
+from groq import Groq
 import os
 import requests
 from dotenv import load_dotenv
-from bson.objectid import ObjectIdxl
+from bson.objectid import ObjectId
 
 st.set_page_config(page_title="Crypto Manager", page_icon="🏦", layout="wide")
 
@@ -79,13 +80,97 @@ if not data:
     st.info("La base est vide.")
     st.stop()
 
-tab1, tab2 = st.tabs(["📈 Vue Marché (Read)", "🛠️ Gestion (Update/Delete)"])
+# Tools IA 
+tools_schema = [
+    {
+        "type": "function",
+        "function": {
+            "name": "create_crypto",
+            "description": "Ajouter une nouvelle cryptomonnaie dans la base de données.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "nom": {"type": "string", "description": "Le nom de la crypto (ex: Bitcoin)"},
+                    "symbole": {"type": "string", "description": "Le ticker (ex: BTC)"},
+                    "prix": {"type": "number", "description": "Le prix actuel en USD"},
+                    "categorie": {"type": "string", "enum": ["Top 10", "Altcoin", "Meme Coin", "Portfolio Perso"]}
+                },
+                "required": ["nom", "symbole", "prix", "categorie"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_crypto_by_name", # On va créer une petite fonction helper pour ça
+            "description": "Supprimer une crypto en donnant son nom.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "nom": {"type": "string", "description": "Le nom exact de la crypto à supprimer"}
+                },
+                "required": ["nom"]
+            }
+        }
+    }
+]
+
+# Petite fonction helper car l'IA ne connait pas les IDs MongoDB
+def delete_crypto_by_name(nom):
+    res = collection.delete_one({"nom": nom})
+    return "Supprimé avec succès." if res.deleted_count > 0 else "Crypto non trouvée."
+
+tab1, tab2, tab3 = st.tabs(["📈 Vue Marché", "🛠️ Gestion", "🧠 Assistant Llama"])
 
 with tab1:
-    # READ
+    st.subheader("📈 Vue Marché Global")
+
+    # --- 1. BARRE DE RECHERCHE & FILTRES ---
+    col_search, col_filter = st.columns([3, 1])
+    
+    with col_search:
+        # Le champ de recherche magique
+        search_query = st.text_input("🔍 Rechercher (Nom ou Symbole)", placeholder="Ex: Bitcoin, BTC, doge...")
+    
+    with col_filter:
+        # On garde le filtre par catégorie car c'est pratique
+        filter_cat = st.selectbox("Catégorie", ["Tout", "Top 10", "Altcoin", "Meme Coin"])
+
+    # --- 2. LOGIQUE DE FILTRAGE (Pandas) ---
+    # On part du DataFrame complet
+    df_filtered = df.copy()
+
+    # A. Filtre Recherche (Si l'utilisateur a écrit quelque chose)
+    if search_query:
+        # On cherche dans le NOM ou (|) dans le SYMBOLE
+        # case=False : permet de trouver "btc" même si on écrit "BTC"
+        # na=False : évite de planter s'il manque une donnée
+        mask = (
+            df_filtered['nom'].str.contains(search_query, case=False, na=False) | 
+            df_filtered['symbole'].str.contains(search_query, case=False, na=False)
+        )
+        df_filtered = df_filtered[mask]
+
+    # B. Filtre Catégorie
+    if filter_cat != "Tout":
+        df_filtered = df_filtered[df_filtered['categorie'] == filter_cat]
+
+    # --- 3. AFFICHAGE ---
+    st.caption(f"{len(df_filtered)} résultats trouvés.")
+    
     st.dataframe(
-        df,
-        column_order=("nom", "symbole", "prix_usd", "categorie", "tendance"),
+        df_filtered,
+        column_order=("image", "nom", "symbole", "prix_usd", "variation_24h", "market_cap", "categorie", "tendance"),
+        column_config={
+            "image": st.column_config.ImageColumn("Logo", width="small"),
+            "nom": "Nom",
+            "symbole": "Ticker",
+            "prix_usd": st.column_config.NumberColumn("Prix ($)", format="$%.2f"),
+            "variation_24h": st.column_config.NumberColumn("Var. 24h", format="%.2f%%"), # Ajoute des couleurs auto
+            "market_cap": st.column_config.NumberColumn("Cap. Marché", format="$%d"),
+            "categorie": "Catégorie"
+        },
+        hide_index=True,
         use_container_width=True
     )
 
@@ -136,3 +221,101 @@ with tab2:
 # KPI Rapides en bas de page
 st.divider()
 st.caption(f"Total éléments dans la base : {len(df)}")
+
+import json # N'oublie pas d'importer json tout en haut si ce n'est pas fait
+
+with tab3:
+    st.header("🕵️‍♂️ Agent Autonome Llama")
+    st.caption("Je peux lire, mais aussi AJOUTER et SUPPRIMER des données. Essaie : 'Ajoute le token TestCoin à 50 dollars'.")
+
+    # Historique
+    if "messages" not in st.session_state:
+        st.session_state.messages = [{"role": "assistant", "content": "Je suis prêt à gérer ta base de données."}]
+
+    for msg in st.session_state.messages:
+        # On n'affiche pas les messages techniques de 'tool_use' pour garder ça propre
+        if msg["role"] != "tool": 
+            st.chat_message(msg["role"]).write(msg["content"])
+
+    # Input Utilisateur
+    if prompt := st.chat_input("Donne-moi un ordre..."):
+        
+        # 1. Affiche la demande user
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        st.chat_message("user").write(prompt)
+
+        # 2. Contexte (Lecture)
+        csv_context = df[['nom', 'prix_usd', 'categorie']].head(30).to_csv(index=False)
+        
+        client_groq = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+        with st.chat_message("assistant"):
+            with st.spinner("L'Agent réfléchit..."):
+                
+                # --- PREMIER APPEL : L'IA DÉCIDE QUOI FAIRE ---
+                messages_history = [
+                    {"role": "system", "content": f"Tu es un gestionnaire de base de données. Tu as accès aux données actuelles :\n{csv_context}\n Si l'utilisateur veut ajouter ou supprimer, UTILISE LES OUTILS fournis."},
+                    *st.session_state.messages # On passe tout l'historique
+                ]
+                
+                response = client_groq.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=messages_history,
+                    tools=tools_schema, # On lui donne les outils !
+                    tool_choice="auto"
+                )
+                
+                tool_calls = response.choices[0].message.tool_calls
+                ai_msg = response.choices[0].message
+
+# --- CAS A : L'IA VEUT UTILISER UN OUTIL (ACTION) ---
+                if tool_calls:
+                    # 1. On sauvegarde le message de l'IA (converti en dictionnaire pour éviter le bug)
+                    st.session_state.messages.append({
+                        "role": ai_msg.role,
+                        "content": ai_msg.content,
+                        "tool_calls": ai_msg.tool_calls
+                    })
+                    
+                    # 2. Boucle sur les outils (Note bien le décalage ici !)
+                    for tool_call in tool_calls:
+                        func_name = tool_call.function.name
+                        args = json.loads(tool_call.function.arguments)
+                        
+                        st.info(f"🛠️ Exécution de : {func_name} avec {args}")
+                        
+                        # Exécution réelle du code Python
+                        result_text = ""
+                        if func_name == "create_crypto":
+                            create_crypto(args["nom"], args["symbole"], args["prix"], args["categorie"])
+                            result_text = f"Succès : {args['nom']} a été ajouté."
+                        elif func_name == "delete_crypto_by_name":
+                            result_text = delete_crypto_by_name(args["nom"])
+                        
+                        # On renvoie le résultat technique à l'IA
+                        st.session_state.messages.append({
+                            "tool_call_id": tool_call.id,
+                            "role": "tool",
+                            "name": func_name,
+                            "content": result_text,
+                        })
+
+                    # 3. DEUXIÈME APPEL : L'IA CONFIRME À L'UTILISATEUR
+                    # (Ce bloc doit être aligné avec le 'for', pas dedans)
+                    final_response = client_groq.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        messages=st.session_state.messages
+                    )
+                    final_text = final_response.choices[0].message.content
+                    st.write(final_text)
+                    st.session_state.messages.append({"role": "assistant", "content": final_text})
+                    
+                    # Petit refresh pour voir les données à jour
+                    if "Succès" in final_text or "Supprimé" in final_text:
+                        st.rerun()
+
+                # --- CAS B : CONVERSATION NORMALE (PAS D'ACTION) ---
+                else:
+                    final_text = ai_msg.content
+                    st.write(final_text)
+                    st.session_state.messages.append({"role": "assistant", "content": final_text})
