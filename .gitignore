@@ -1,0 +1,15 @@
+# Sécurité : Ne jamais publier les mots de passe
+.env
+
+# Système : Fichiers temporaires Python
+__pycache__/
+*.pyc
+
+# Environnement virtuel (trop lourd, chacun crée le sien)
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
